@@ -1,13 +1,21 @@
-name: Maven Build
+name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  # Runs on every push, including feature branches: compile main + test sources.
+  # The validate phase also gates on enforcer (JDK >= 17), spring-javaformat and
+  # the nohttp checkstyle rules, so formatting breaks surface here in seconds.
+  # No tests run here, so there is nothing for test-summary.py to report.
+  compile:
+    name: Compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,9 +27,69 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build with Maven
-        run: ./mvnw -B verify
+      - name: Compile
+        run: ./mvnw -B test-compile
+
+  # Everything except *IntegrationTests: unit, @WebMvcTest and @DataJpaTest (72 tests).
+  test:
+    name: Tests
+    needs: compile
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run tests
+        run: ./mvnw -B test -Dtest='!*IntegrationTests'
 
       - name: Test summary
         if: always()
         run: python3 .github/scripts/test-summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-test
+          path: target/surefire-reports/
+          if-no-files-found: warn
+
+  # *IntegrationTests: boot the whole app and talk to it over HTTP. MySql and
+  # Postgres variants need Docker (Testcontainers / docker compose), which is
+  # available on ubuntu-latest, so unlike a local run they are not skipped here.
+  e2e:
+    name: E2E
+    needs: compile
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run integration tests
+        run: ./mvnw -B test -Dtest='*IntegrationTests'
+
+      - name: Test summary
+        if: always()
+        run: python3 .github/scripts/test-summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-e2e
+          path: target/surefire-reports/
+          if-no-files-found: warn
