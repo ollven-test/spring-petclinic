@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     # Every Friday at 17:00 local time (Asia/Nicosia, EET/EEST)
@@ -23,10 +24,12 @@ jobs:
       contents: write
     uses: ./.github/workflows/release.yml
 
-  # Runs on every push, including feature branches: compile main + test sources.
-  # The validate phase also gates on enforcer (JDK >= 17), spring-javaformat and
-  # the nohttp checkstyle rules, so formatting breaks surface here in seconds.
+  # Compiles main + test sources. The validate phase also gates on enforcer
+  # (JDK >= 17), spring-javaformat and the nohttp checkstyle rules, so
+  # formatting breaks surface here in seconds rather than after the test jobs.
   # No tests run here, so there is nothing for test-summary.py to report.
+  # Feature branches get the same gate from branch-compile.yml before a pull
+  # request exists.
   compile:
     name: Compile
     if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -50,7 +53,7 @@ jobs:
   test:
     name: Tests
     needs: compile
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -97,7 +100,7 @@ jobs:
   e2e:
     name: E2E
     needs: compile
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

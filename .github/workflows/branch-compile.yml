@@ -1,0 +1,30 @@
+name: Branch compile
+
+# Fast gate for work in progress on a feature branch, before a pull request
+# exists. Pushes to main and pull requests are handled by maven-build.yml;
+# keeping this separate means a pull request run does not carry three skipped
+# jobs (Tests, E2E, release) just because the same commit was also pushed.
+on:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: branch-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Compile
+        run: ./mvnw -B test-compile
