@@ -6,7 +6,9 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '*/5 * * * *'
+    # Every Friday at 17:00 local time (Asia/Nicosia, EET/EEST)
+    - cron: '0 17 * * 5'
+      timezone: 'Asia/Nicosia'
   workflow_dispatch:
 
 jobs:
