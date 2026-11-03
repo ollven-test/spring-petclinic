@@ -7,6 +7,8 @@ name: Release
 #
 # Can also be started manually: Actions -> Release -> Run workflow.
 #
+# Releases are created from main only; a run on any other branch or tag fails.
+#
 # Before releasing, it checks that a CI run (maven-build.yml) passed the
 # Compile, Tests and E2E jobs for the same commit. This also covers manual
 # runs of this workflow, which do not build anything themselves.
@@ -37,6 +39,12 @@ jobs:
       group: release
       cancel-in-progress: false
     steps:
+      - name: Allow releases from main only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are created from main only. This run is on $GITHUB_REF; start it on main instead."
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

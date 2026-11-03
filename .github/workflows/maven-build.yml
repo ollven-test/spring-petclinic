@@ -18,9 +18,12 @@ concurrency:
 jobs:
   # Release logic lives in release.yml so it can change without touching this file.
   # Runs only after Compile, Tests and E2E all pass; if any fails, release is skipped.
+  # Releases come from main only; a manual run on another branch just runs the tests.
   release:
     needs: [compile, test, e2e]
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
       actions: read
