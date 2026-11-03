@@ -5,9 +5,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Every Friday at 17:00 local time (Asia/Nicosia, EET/EEST)
+    - cron: '0 17 * * 5'
+      timezone: 'Asia/Nicosia'
+  workflow_dispatch:
 
 jobs:
+  # Release logic lives in release.yml so it can change without touching this file.
+  release:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+
   build:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
