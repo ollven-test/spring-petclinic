@@ -5,6 +5,8 @@ name: Release
 # (v1.2.9 -> v1.2.10), or v0.1.0 when the repo has no releases yet.
 # Skips without failing when the latest release already points at the commit.
 #
+# Can also be started manually: Actions -> Release -> Run workflow.
+#
 # Usage from another workflow. The caller must grant contents: write,
 # because a called workflow cannot raise the caller's token permissions.
 #
@@ -16,6 +18,8 @@ name: Release
 
 on:
   workflow_call:
+  # Run on its own from the Actions tab, e.g. to test a release.
+  workflow_dispatch:
 
 jobs:
   release:
