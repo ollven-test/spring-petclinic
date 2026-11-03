@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -39,3 +42,39 @@ jobs:
           name: jacoco-report
           path: target/site/jacoco/
           if-no-files-found: error
+
+      - name: Build reports site
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        run: |
+          ./mvnw -B -q org.apache.maven.plugins:maven-surefire-report-plugin:3.6.1:report-only
+          mkdir -p _site/tests
+          cp -r target/reports/. _site/tests/
+          mv _site/tests/surefire.html _site/tests/index.html
+          if [ -d target/site/jacoco ]; then cp -r target/site/jacoco _site/coverage; fi
+          sed -e "s|{{SHA}}|${GITHUB_SHA::7}|" \
+              -e "s|{{RUN_URL}}|${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|" \
+              .github/pages/index.html > _site/index.html
+
+      - name: Upload reports site
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  publish-reports:
+    needs: build
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
