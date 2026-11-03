@@ -7,13 +7,21 @@ name: Release
 #
 # Can also be started manually: Actions -> Release -> Run workflow.
 #
-# Usage from another workflow. The caller must grant contents: write,
+# Releases are created from main only; a run on any other branch or tag fails.
+#
+# Before releasing, it checks that a CI run (maven-build.yml) passed the
+# Compile, Tests and E2E jobs for the same commit. This also covers manual
+# runs of this workflow, which do not build anything themselves.
+#
+# Usage from another workflow. The caller must grant these permissions,
 # because a called workflow cannot raise the caller's token permissions.
 #
 #   jobs:
 #     release:
+#       needs: [compile, test, e2e]
 #       permissions:
 #         contents: write
+#         actions: read
 #       uses: ./.github/workflows/release.yml
 
 on:
@@ -26,10 +34,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     concurrency:
       group: release
       cancel-in-progress: false
     steps:
+      - name: Allow releases from main only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are created from main only. This run is on $GITHUB_REF; start it on main instead."
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -66,6 +81,31 @@ jobs:
             echo "last_tag=$LAST_TAG"
             echo "next_tag=$NEXT_TAG"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Verify CI passed for this commit
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Job names in maven-build.yml that must all pass in one run.
+          REQUIRED_JOBS: Compile Tests E2E
+        run: |
+          set -euo pipefail
+          RUNS=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/maven-build.yml/runs?head_sha=$GITHUB_SHA&per_page=50" \
+            --jq '.workflow_runs[].id')
+          for RUN in $RUNS; do
+            PASSED=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/jobs?per_page=100" \
+              --jq '.jobs[] | select(.conclusion == "success") | .name')
+            MISSING=""
+            for JOB in $REQUIRED_JOBS; do
+              grep -qxF "$JOB" <<<"$PASSED" || MISSING="$MISSING $JOB"
+            done
+            if [ -z "$MISSING" ]; then
+              echo "$REQUIRED_JOBS passed for $GITHUB_SHA in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
+              exit 0
+            fi
+          done
+          echo "::error::No CI run passed all of [$REQUIRED_JOBS] for $GITHUB_SHA. Run CI on this commit and fix failures before releasing."
+          exit 1
 
       - name: Create GitHub release
         if: steps.check.outputs.skip == 'false'

@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  # Feature branch pushes are handled by branch-compile.yml. Keeping them out
+  # of this workflow stops a pull request from carrying a second, mostly
+  # skipped, copy of every job.
   push:
     branches: [main]
   pull_request:
@@ -18,21 +21,25 @@ concurrency:
 
 jobs:
   # Release logic lives in release.yml so it can change without touching this file.
+  # Runs only after Compile, Tests and E2E all pass; if any fails, release is skipped.
+  # Releases come from main only; a manual run on another branch just runs the tests.
   release:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [compile, test, e2e]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
+      actions: read
     uses: ./.github/workflows/release.yml
 
   # Compiles main + test sources. The validate phase also gates on enforcer
   # (JDK >= 17), spring-javaformat and the nohttp checkstyle rules, so
   # formatting breaks surface here in seconds rather than after the test jobs.
   # No tests run here, so there is nothing for test-summary.py to report.
-  # Feature branches get the same gate from branch-compile.yml before a pull
-  # request exists.
+  # Feature branches get the same gate from branch-compile.yml.
   compile:
     name: Compile
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -53,7 +60,8 @@ jobs:
   test:
     name: Tests
     needs: compile
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    # No condition: every event this workflow accepts wants the tests. Push is
+    # restricted to main above, and the release triggers depend on these jobs.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -100,7 +108,8 @@ jobs:
   e2e:
     name: E2E
     needs: compile
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    # No condition: every event this workflow accepts wants the tests. Push is
+    # restricted to main above, and the release triggers depend on these jobs.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
