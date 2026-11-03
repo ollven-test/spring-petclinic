@@ -5,9 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,3 +25,63 @@ jobs:
 
       - name: Build with Maven
         run: ./mvnw -B verify
+
+  release:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since last release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(git rev-parse HEAD)
+          LAST_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release found; creating the first one."
+            NEXT_TAG="v0.1.0"
+          else
+            LAST_SHA=$(git rev-list -n 1 "$LAST_TAG")
+            if [ "$LAST_SHA" = "$HEAD_SHA" ]; then
+              echo "No changes since $LAST_TAG ($LAST_SHA); skipping release."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ ! "$LAST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "::error::Latest release tag '$LAST_TAG' is not in vMAJOR.MINOR.PATCH format; cannot compute next version."
+              exit 1
+            fi
+            NEXT_TAG="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            echo "Changes found since $LAST_TAG; next release will be $NEXT_TAG."
+          fi
+
+          {
+            echo "skip=false"
+            echo "last_tag=$LAST_TAG"
+            echo "next_tag=$NEXT_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST_TAG: ${{ steps.check.outputs.last_tag }}
+          NEXT_TAG: ${{ steps.check.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEXT_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$NEXT_TAG" \
+            --generate-notes \
+            ${LAST_TAG:+--notes-start-tag "$LAST_TAG"}
