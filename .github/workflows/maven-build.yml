@@ -25,3 +25,17 @@ jobs:
       - name: Test summary
         if: always()
         run: python3 .github/scripts/test-summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload application jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-petclinic-jar
+          path: target/spring-petclinic-*.jar
+          if-no-files-found: error
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          if-no-files-found: error
