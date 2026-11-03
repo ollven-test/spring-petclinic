@@ -3,19 +3,33 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    # Every Friday at 17:00 local time (Asia/Nicosia, EET/EEST)
+    - cron: '0 17 * * 5'
+      timezone: 'Asia/Nicosia'
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded pull request runs are safe to kill. Cancelling a run on
+  # main could abort a release half way through.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Release logic lives in release.yml so it can change without touching this file.
+  release:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+
   # Runs on every push, including feature branches: compile main + test sources.
   # The validate phase also gates on enforcer (JDK >= 17), spring-javaformat and
   # the nohttp checkstyle rules, so formatting breaks surface here in seconds.
   # No tests run here, so there is nothing for test-summary.py to report.
   compile:
     name: Compile
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -31,10 +45,12 @@ jobs:
         run: ./mvnw -B test-compile
 
   # Everything except *IntegrationTests: unit, @WebMvcTest and @DataJpaTest (72 tests).
+  # Runs the full verify lifecycle, so the jar and the coverage report come from
+  # here. The coverage therefore reflects these tests only, not the e2e job.
   test:
     name: Tests
     needs: compile
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -47,7 +63,7 @@ jobs:
           cache: maven
 
       - name: Run tests
-        run: ./mvnw -B test -Dtest='!*IntegrationTests'
+        run: ./mvnw -B verify -Dtest='!*IntegrationTests'
 
       - name: Test summary
         if: always()
@@ -61,13 +77,27 @@ jobs:
           path: target/surefire-reports/
           if-no-files-found: warn
 
+      - name: Upload application jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: spring-petclinic-jar
+          path: target/spring-petclinic-*.jar
+          if-no-files-found: error
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          if-no-files-found: error
+
   # *IntegrationTests: boot the whole app and talk to it over HTTP. MySql and
   # Postgres variants need Docker (Testcontainers / docker compose), which is
   # available on ubuntu-latest, so unlike a local run they are not skipped here.
   e2e:
     name: E2E
     needs: compile
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
